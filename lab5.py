@@ -1,9 +1,74 @@
+import pickle
 from time import strftime, gmtime
+from hashlib import sha256
+import time
+import socket
 
-BTC_HOST = 'hello'  # FIXME
+
+
+MY_IP = '127.0.0.1'
+BTC_IP = '218.31.113.245'  # FIXME
 BTC_PORT = 8333
+BTC_PEER_ADDRESS = (BTC_IP, BTC_PORT)
+START_STRING = 'f9beb4d9'
 SU_ID = 4124597
+HEADER_SIZE = 24  # 4 + 12 + 4 + 4
+COMMAND_SIZE = 12
 BLOCK_NUMBER = SU_ID % 700000
+
+
+def send_message(msg_packet):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
+        peer_sock.connect(BTC_PEER_ADDRESS)
+        try:
+            peer_sock.sendall(msg_packet)
+        except Exception as e:
+            print('Failed to send message to {} at [{}]: {}'
+                  .format(BTC_PEER_ADDRESS, time.time(), str(e)))
+        else:
+            return peer_sock.recv(1024)
+
+
+def checksum(payload):
+    return sha256(sha256(payload).digest()).digest()[:4]
+
+
+def get_empty_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((MY_IP, 0))
+        port = sock.getsockname()[1]
+    return port
+
+
+def build_message_header(command, payload: bytes):
+    start_string = bytes.fromhex(START_STRING)
+    command_name = command.encode('ascii')
+    while len(command_name) < COMMAND_SIZE:
+        command_name += b'\0'
+    payload_size = uint32_t(len(payload))
+    check_sum = checksum(payload)
+    return start_string + command_name + payload_size + check_sum
+
+
+def build_version_message():
+    version = int32_t(70015)  # Version 70015
+    services = uint64_t(0)  # Unnamed - not full node
+    timestamp = int64_t(int(time.time()))  # Current UNIX epoch
+    addr_recv_services = uint64_t(1)  # Full node
+    addr_recv_ip_address = ipv6_from_ipv4(BTC_IP)  # Big endian
+    addr_recv_port = uint16_t(BTC_PORT)
+    addr_trans_services = services  # Identical to services
+    addr_trans_ip_address = ipv6_from_ipv4(MY_IP)  # Big endian
+    addr_trans_port = uint16_t(get_empty_port())
+    nonce = uint64_t(0)
+    user_agent_bytes = compactsize_t(0)  # 0 so no user agent field
+    start_height = int32_t(0)
+    relay = bool_t(False)
+
+    return b''.join([version, services, timestamp, addr_recv_services,
+                     addr_recv_ip_address, addr_recv_port, addr_trans_services,
+                     addr_trans_ip_address, addr_trans_port, nonce,
+                     user_agent_bytes, start_height, relay])
 
 
 def compactsize_t(n):
@@ -80,8 +145,8 @@ def print_message(msg, text=None):
     """
     print('\n{}MESSAGE'.format('' if text is None else (text + ' ')))
     print('({}) {}'.format(len(msg), msg[:60].hex() + ('' if len(msg) < 60 else '...')))
-    payload = msg[HDR_SZ:]
-    command = print_header(msg[:HDR_SZ], checksum(payload))
+    payload = msg[HEADER_SIZE:]
+    command = print_header(msg[:HEADER_SIZE], checksum(payload))
     if command == 'version':
         print_version_msg(payload)
     # FIXME print out the payloads of other types of messages, too
@@ -156,7 +221,13 @@ def print_header(header, expected_cksum=None):
 
 
 def main():
-    pass
+    version_msg = build_version_message()
+    version_msg_header = build_message_header('version', version_msg)
+    my_msg = version_msg_header + version_msg
+    print_message(my_msg, 'sending')
+
+    peer_msg = send_message(my_msg)
+    print_message(peer_msg, 'receive')
 
 
 if __name__ == '__main__':
