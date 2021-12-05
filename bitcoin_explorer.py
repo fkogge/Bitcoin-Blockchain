@@ -7,15 +7,16 @@ value of a transaction and print out the new merkle root and block hashes,
 which would cause the block to get rejected by the rest of the Bitcoin network.
 
 Author: Francis Kogge
-Date: 12/04/2021
-Course: CPSC 5520
+Date: 12/05/2021
 """
 
 import random
 import time
 import socket
+import bitcoin_bytes as btc_bytes
 from time import strftime, gmtime
 from hashlib import sha256
+
 
 ''' 
 IPs used for testing:
@@ -37,7 +38,7 @@ HEADER_SIZE = 24  # For all Bitcoin message headers
 COMMAND_SIZE = 12  # Message command length
 VERSION = 70015
 SU_ID = 4124597
-BLOCK_NUMBER = 6554#SU_ID % 10000  # 4597
+BLOCK_NUMBER = 6554  # Pick any block number
 BUFFER_SIZE = 64000  # sock recv argument
 PREFIX = '  '
 
@@ -57,19 +58,19 @@ def version_message():
     Builds the version message payload, per the Bitcoin protocol.
     :return: version message bytes
     """
-    version = int32_t(VERSION)  # Version 70015
-    services = uint64_t(0)  # Unnamed - not full node
-    timestamp = int64_t(int(time.time()))  # Current UNIX epoch
-    addr_recv_services = uint64_t(1)  # Full node
-    addr_recv_ip_address = ipv6_from_ipv4(BTC_IP)  # Big endian
-    addr_recv_port = uint16_t(BTC_PORT)
-    addr_trans_services = uint64_t(0)  # Identical to services
-    addr_trans_ip_address = ipv6_from_ipv4(MY_IP)  # Big endian
-    addr_trans_port = uint16_t(BTC_PORT)
-    nonce = uint64_t(0)
-    user_agent_bytes = compactsize_t(0)  # 0 so no user agent field
-    start_height = int32_t(0)
-    relay = bool_t(False)
+    version = btc_bytes.int32_t(VERSION)  # Version 70015
+    services = btc_bytes.uint64_t(0)  # Unnamed - not full node
+    timestamp = btc_bytes.int64_t(int(time.time()))  # Current UNIX epoch
+    addr_recv_services = btc_bytes.uint64_t(1)  # Full node
+    addr_recv_ip_address = btc_bytes.ipv6_from_ipv4(BTC_IP)  # Big endian
+    addr_recv_port = btc_bytes.uint16_t(BTC_PORT)
+    addr_trans_services = btc_bytes.uint64_t(0)  # Identical to services
+    addr_trans_ip_address = btc_bytes.ipv6_from_ipv4(MY_IP)  # Big endian
+    addr_trans_port = btc_bytes.uint16_t(BTC_PORT)
+    nonce = btc_bytes.uint64_t(0)
+    user_agent_bytes = btc_bytes.compactsize_t(0)  # 0 so no user agent field
+    start_height = btc_bytes.int32_t(0)
+    relay = btc_bytes.bool_t(False)
     return b''.join([version, services, timestamp, addr_recv_services,
                      addr_recv_ip_address, addr_recv_port, addr_trans_services,
                      addr_trans_ip_address, addr_trans_port, nonce,
@@ -84,8 +85,8 @@ def getdata_message(tx_type, header_hash):
     :return: getdata message bytes
     """
     # Identical to inv
-    count = compactsize_t(1)
-    entry_type = uint32_t(tx_type)
+    count = btc_bytes.compactsize_t(1)
+    entry_type = btc_bytes.uint32_t(tx_type)
     entry_hash = bytes.fromhex(header_hash)
     return count + entry_type + entry_hash
 
@@ -96,8 +97,8 @@ def getblocks_message(header_hash):
     :param header_hash: locator block hash, for peer to find
     :return: getblocks message bytes
     """
-    version = uint32_t(VERSION)
-    hash_count = compactsize_t(1)
+    version = btc_bytes.uint32_t(VERSION)
+    hash_count = btc_bytes.compactsize_t(1)
     # Assuming we pass in an already computed sha256(sha256(block)) hash
     block_header_hashes = bytes.fromhex(header_hash)
     # Always ask for max number of blocks
@@ -110,7 +111,7 @@ def ping_message():
     Build the ping payload, per the Bitcoin protocol.
     :return: ping message bytes
     """
-    return uint64_t(random.getrandbits(64))
+    return btc_bytes.uint64_t(random.getrandbits(64))
 
 
 def message_header(command, payload):
@@ -124,7 +125,7 @@ def message_header(command, payload):
     command_name = command.encode('ascii')
     while len(command_name) < COMMAND_SIZE:
         command_name += b'\0'
-    payload_size = uint32_t(len(payload))
+    payload_size = btc_bytes.uint32_t(len(payload))
     check_sum = checksum(payload)
     return b''.join([magic, command_name, payload_size, check_sum])
 
@@ -146,105 +147,6 @@ def hash(payload: bytes):
     :return: hash bytes
     """
     return sha256(sha256(payload).digest()).digest()
-
-
-def compactsize_t(n):
-    """
-    Marshals compactsize data type.
-    :param n: integer
-    :return: marshalled compactsize integer
-    """
-    if n < 252:
-        return uint8_t(n)
-    if n < 0xffff:
-        return uint8_t(0xfd) + uint16_t(n)
-    if n < 0xffffffff:
-        return uint8_t(0xfe) + uint32_t(n)
-    return uint8_t(0xff) + uint64_t(n)
-
-
-def unmarshal_compactsize(b):
-    """
-    Unarshals compactsize data type.
-    :param n: bytes
-    :return: raw bytes, integer
-    """
-    key = b[0]
-    if key == 0xff:
-        return b[0:9], unmarshal_uint(b[1:9])
-    if key == 0xfe:
-        return b[0:5], unmarshal_uint(b[1:5])
-    if key == 0xfd:
-        return b[0:3], unmarshal_uint(b[1:3])
-    return b[0:1], unmarshal_uint(b[0:1])
-
-
-def bool_t(flag):
-    """Marshal bool to unsigned, 8 bit"""
-    return uint8_t(1 if flag else 0)
-
-
-def ipv6_from_ipv4(ipv4_str):
-    """Marshal ipv4 string to ipv6"""
-    pchIPv4 = bytearray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff])
-    return pchIPv4 + bytearray((int(x) for x in ipv4_str.split('.')))
-
-
-def ipv6_to_ipv4(ipv6):
-    """Unmarshal ipv6 bytes to ipv4 string"""
-    return '.'.join([str(b) for b in ipv6[12:]])
-
-
-def uint8_t(n):
-    """Marshal integer to unsigned, 8 bit"""
-    return int(n).to_bytes(1, byteorder='little', signed=False)
-
-
-def uint16_t(n):
-    """Marshal integer to unsigned, 16 bit"""
-    return int(n).to_bytes(2, byteorder='little', signed=False)
-
-
-def int32_t(n):
-    """Marshal integer to signed, 32 bit"""
-    return int(n).to_bytes(4, byteorder='little', signed=True)
-
-
-def uint32_t(n):
-    """Marshal integer to unsigned, 32 bit"""
-    return int(n).to_bytes(4, byteorder='little', signed=False)
-
-
-def int64_t(n):
-    """Marshal integer to signed, 64 bit"""
-    return int(n).to_bytes(8, byteorder='little', signed=True)
-
-
-def uint64_t(n):
-    """Marshal integer to unsigned, 64 bit"""
-    return int(n).to_bytes(8, byteorder='little', signed=False)
-
-
-def unmarshal_int(b):
-    """Unmarshal signed integer"""
-    return int.from_bytes(b, byteorder='little', signed=True)
-
-
-def unmarshal_uint(b):
-    """Unmarshal unsigned integer"""
-    return int.from_bytes(b, byteorder='little', signed=False)
-
-
-def swap_endian(b: bytes):
-    """
-    Swap the endianness of the given bytes. If little, swaps to big. If big,
-    swaps to little.
-    :param b: bytes to swap
-    :return: swapped bytes
-    """
-    swapped = bytearray.fromhex(b.hex())
-    swapped.reverse()
-    return swapped
 
 
 def sat_to_btc(sat):
@@ -297,7 +199,7 @@ def print_inv_message(payload, height):
     :param payload: inv message payload
     :param height: local blockchain height
     """
-    count_bytes, count = unmarshal_compactsize(payload)
+    count_bytes, count = btc_bytes.unmarshal_compactsize(payload)
     i = len(count_bytes)
     inventory = []
     for _ in range(count):
@@ -310,8 +212,8 @@ def print_inv_message(payload, height):
     for i, (tx_type, tx_hash) in enumerate(inventory,
                                            start=height if height else 1):
         print('\n{}{:32} type: {}\n{}-'
-              .format(prefix, tx_type.hex(), unmarshal_uint(tx_type), prefix))
-        block_hash = swap_endian(tx_hash).hex()
+              .format(prefix, tx_type.hex(), btc_bytes.unmarshal_uint(tx_type), prefix))
+        block_hash = btc_bytes.swap_endian(tx_hash).hex()
         print('{}{:32}\n{}{:32} block #{} hash'
               .format(prefix, block_hash[:32], prefix, block_hash[32:], i))
 
@@ -322,7 +224,7 @@ def print_getblocks_message(payload):
     :param payload: getblocks message payload
     """
     version = payload[:4]
-    hash_count_bytes, hash_count = unmarshal_compactsize(payload[4:])
+    hash_count_bytes, hash_count = btc_bytes.unmarshal_compactsize(payload[4:])
     i = 4 + len(hash_count_bytes)
     block_header_hashes = []
     for _ in range(hash_count):
@@ -332,18 +234,17 @@ def print_getblocks_message(payload):
 
     prefix = PREFIX * 2
     print('{}{:32} version: {}'.format(prefix, version.hex(),
-                                       unmarshal_uint(version)))
-    print('{}{:32} hash count: {}'.format(prefix, hash_count_bytes.hex(),
-                                          hash_count))
+                                       btc_bytes.unmarshal_uint(version)))
+    print('{}{:32} hash count: {}'.format(prefix, hash_count_bytes.hex(), hash_count))
     for hash in block_header_hashes:
-        hash_hex = swap_endian(hash).hex()
+        hash_hex = btc_bytes.swap_endian(hash).hex()
         print('\n{}{:32}\n{}{:32} block header hash # {}: {}'
               .format(prefix, hash_hex[:32], prefix, hash_hex[32:], 1,
-                      unmarshal_uint(hash)))
+                      btc_bytes.unmarshal_uint(hash)))
     stop_hash_hex = stop_hash.hex()
     print('\n{}{:32}\n{}{:32} stop hash: {}'.format(prefix, stop_hash_hex[:32],
                                                     prefix, stop_hash_hex[32:],
-                                                    unmarshal_uint(stop_hash)))
+                                                    btc_bytes.unmarshal_uint(stop_hash)))
 
 
 def print_feefilter_message(feerate):
@@ -352,8 +253,7 @@ def print_feefilter_message(feerate):
     :param feerate: feefilter message payload
     """
     prefix = PREFIX * 2
-    print('{}{:32} count: {}'.format(prefix, feerate.hex(),
-                                     unmarshal_uint(feerate)))
+    print('{}{:32} count: {}'.format(prefix, feerate.hex(), btc_bytes.unmarshal_uint(feerate)))
 
 
 def print_addr_message(payload):
@@ -361,7 +261,7 @@ def print_addr_message(payload):
     Prints contents of the addr message.
     :param payload: addr message payload
     """
-    ip_count_bytes, ip_addr_count = unmarshal_compactsize(payload)
+    ip_count_bytes, ip_addr_count = btc_bytes.unmarshal_compactsize(payload)
     i = len(ip_count_bytes)
     epoch_time, services, ip_addr, port = \
         payload[i:i + 4], payload[i + 4:i + 12], \
@@ -369,14 +269,11 @@ def print_addr_message(payload):
     prefix = PREFIX * 2
     print('{}{:32} count: {}'.format(prefix, ip_count_bytes.hex(),
                                      ip_addr_count))
-    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT",
-                        gmtime(unmarshal_int(epoch_time)))
+    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(btc_bytes.unmarshal_int(epoch_time)))
     print('{}{:32} epoch time: {}'.format(prefix, epoch_time.hex(), time_str))
-    print('{}{:32} services: {}'.format(prefix, services.hex(),
-                                        unmarshal_uint(services)))
-    print('{}{:32} host: {}'.format(prefix, ip_addr.hex(),
-                                    ipv6_to_ipv4(ip_addr)))
-    print('{}{:32} port: {}'.format(prefix, port.hex(), unmarshal_uint(port)))
+    print('{}{:32} services: {}'.format(prefix, services.hex(), btc_bytes.unmarshal_uint(services)))
+    print('{}{:32} host: {}'.format(prefix, ip_addr.hex(), btc_bytes.ipv6_to_ipv4(ip_addr)))
+    print('{}{:32} port: {}'.format(prefix, port.hex(), btc_bytes.unmarshal_uint(port)))
 
 
 def print_ping_pong_message(nonce):
@@ -385,8 +282,7 @@ def print_ping_pong_message(nonce):
     :param nonce: payload (always nonce)
     """
     prefix = PREFIX * 2
-    print('{}{:32} nonce: {}'.format(prefix, nonce.hex(),
-                                     unmarshal_uint(nonce)))
+    print('{}{:32} nonce: {}'.format(prefix, nonce.hex(), btc_bytes.unmarshal_uint(nonce)))
 
 
 def print_sendcmpct_message(payload):
@@ -398,8 +294,7 @@ def print_sendcmpct_message(payload):
     prefix = PREFIX * 2
     print('{}{:32} announce: {}'.format(prefix, announce.hex(),
                                         bytes(announce) != b'\0'))
-    print('{}{:32} version: {}'.format(prefix, version.hex(),
-                                       unmarshal_uint(version)))
+    print('{}{:32} version: {}'.format(prefix, version.hex(), btc_bytes.unmarshal_uint(version)))
 
 
 def print_version_msg(b):
@@ -413,7 +308,7 @@ def print_version_msg(b):
     rec_host, rec_port, my_services2, my_host, my_port = \
         b[28:44], b[44:46], b[46:54], b[54:70], b[70:72]
     nonce = b[72:80]
-    user_agent_size, uasz = unmarshal_compactsize(b[80:])
+    user_agent_size, uasz = btc_bytes.unmarshal_compactsize(b[80:])
     i = 80 + len(user_agent_size)
     user_agent = b[i:i + uasz]
     i += uasz
@@ -422,29 +317,20 @@ def print_version_msg(b):
 
     # print report
     prefix = PREFIX * 2
-    print('{}{:32} version {}'.format(prefix, version.hex(),
-                                      unmarshal_int(version)))
+    print('{}{:32} version {}'.format(prefix, version.hex(), btc_bytes.unmarshal_int(version)))
     print('{}{:32} my services'.format(prefix, my_services.hex()))
-    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT",
-                        gmtime(unmarshal_int(epoch_time)))
+    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(btc_bytes.unmarshal_int(epoch_time)))
     print('{}{:32} epoch time {}'.format(prefix, epoch_time.hex(), time_str))
     print('{}{:32} your services'.format(prefix, your_services.hex()))
-    print('{}{:32} your host {}'.format(prefix, rec_host.hex(),
-                                        ipv6_to_ipv4(rec_host)))
-    print('{}{:32} your port {}'.format(prefix, rec_port.hex(),
-                                        unmarshal_uint(rec_port)))
+    print('{}{:32} your host {}'.format(prefix, rec_host.hex(), btc_bytes.ipv6_to_ipv4(rec_host)))
+    print('{}{:32} your port {}'.format(prefix, rec_port.hex(), btc_bytes.unmarshal_uint(rec_port)))
     print('{}{:32} my services (again)'.format(prefix, my_services2.hex()))
-    print('{}{:32} my host {}'.format(prefix, my_host.hex(),
-                                      ipv6_to_ipv4(my_host)))
-    print('{}{:32} my port {}'.format(prefix, my_port.hex(),
-                                      unmarshal_uint(my_port)))
+    print('{}{:32} my host {}'.format(prefix, my_host.hex(), btc_bytes.ipv6_to_ipv4(my_host)))
+    print('{}{:32} my port {}'.format(prefix, my_port.hex(), btc_bytes.unmarshal_uint(my_port)))
     print('{}{:32} nonce'.format(prefix, nonce.hex()))
-    print('{}{:32} user agent size {}'.format(prefix, user_agent_size.hex(),
-                                              uasz))
-    print('{}{:32} user agent \'{}\''.format(prefix, user_agent.hex(),
-                                             str(user_agent, encoding='utf-8')))
-    print('{}{:32} start height {}'.format(prefix, start_height.hex(),
-                                           unmarshal_uint(start_height)))
+    print('{}{:32} user agent size {}'.format(prefix, user_agent_size.hex(), uasz))
+    print('{}{:32} user agent \'{}\''.format(prefix, user_agent.hex(), str(user_agent, encoding='utf-8')))
+    print('{}{:32} start height {}'.format(prefix, start_height.hex(), btc_bytes.unmarshal_uint(start_height)))
     print('{}{:32} relay {}'.format(prefix, relay.hex(), bytes(relay) != b'\0'))
     if len(extra) > 0:
         print('{}{:32} EXTRA!!'.format(prefix, extra.hex()))
@@ -460,9 +346,8 @@ def print_header(header, expected_cksum=None):
     """
     magic, command_hex, payload_size, cksum = \
         header[:4], header[4:16], header[16:20], header[20:]
-    command = str(bytearray([b for b in command_hex if b != 0]),
-                  encoding='utf-8')
-    psz = unmarshal_uint(payload_size)
+    command = str(bytearray([b for b in command_hex if b != 0]), encoding='utf-8')
+    psz = btc_bytes.unmarshal_uint(payload_size)
     if expected_cksum is None:
         verified = ''
     elif expected_cksum == cksum:
@@ -487,35 +372,31 @@ def print_block_message(payload):
     """
     # Block header (80 bytes)
     version, prev_block, merkle_root, epoch_time, bits, nonce = \
-        payload[:4], payload[4:36], payload[36:68], payload[68:72], \
-        payload[72:76], payload[76:80]
+        payload[:4], payload[4:36], payload[36:68], payload[68:72], payload[72:76], payload[76:80]
 
-    txn_count_bytes, txn_count = unmarshal_compactsize(payload[80:])
+    txn_count_bytes, txn_count = btc_bytes.unmarshal_compactsize(payload[80:])
     txns = payload[80 + len(txn_count_bytes):]
 
     prefix = PREFIX * 2
-    block_hash = swap_endian(hash(payload[:80]))
+    block_hash = btc_bytes.swap_endian(hash(payload[:80]))
     print('{}{:32}\n{}{:32} block hash\n{}-'
           .format(prefix, block_hash.hex()[:32],
                   prefix, block_hash.hex()[32:], prefix))
     print('{}{:32} version: {}\n{}-'.
-          format(prefix, version.hex(), unmarshal_int(version), prefix))
-    prev_hash = swap_endian(prev_block)
+          format(prefix, version.hex(), btc_bytes.unmarshal_int(version), prefix))
+    prev_hash = btc_bytes.swap_endian(prev_block)
     print('{}{:32}\n{}{:32} prev block hash\n{}-'
           .format(prefix, prev_hash.hex()[:32],
                   prefix, prev_hash.hex()[32:], prefix))
-    merkle_hash = swap_endian(merkle_root)
+    merkle_hash = btc_bytes.swap_endian(merkle_root)
     print('{}{:32}\n{}{:32} merkle root hash\n{}-'
           .format(prefix, merkle_hash.hex()[:32],
                   prefix, merkle_hash.hex()[32:], prefix))
-    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT",
-                        gmtime(unmarshal_int(epoch_time)))
+    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(btc_bytes.unmarshal_int(epoch_time)))
     print('{}{:32} epoch time: {}'.format(prefix, epoch_time.hex(), time_str))
-    print('{}{:32} bits: {}'.format(prefix, bits.hex(), unmarshal_uint(bits)))
-    print('{}{:32} nonce: {}'.format(prefix, nonce.hex(),
-                                     unmarshal_uint(nonce)))
-    print('{}{:32} transaction count: {}'
-          .format(prefix, txn_count_bytes.hex(), txn_count))
+    print('{}{:32} bits: {}'.format(prefix, bits.hex(), btc_bytes.unmarshal_uint(bits)))
+    print('{}{:32} nonce: {}'.format(prefix, nonce.hex(), btc_bytes.unmarshal_uint(nonce)))
+    print('{}{:32} transaction count: {}'.format(prefix, txn_count_bytes.hex(), txn_count))
     print_transaction(txns)
 
 
@@ -526,7 +407,7 @@ def print_transaction(txn_bytes):
     """
     # Parse version and transaction input count bytes
     version = txn_bytes[:4]
-    tx_in_count_bytes, tx_in_count = unmarshal_compactsize(txn_bytes[4:])
+    tx_in_count_bytes, tx_in_count = btc_bytes.unmarshal_compactsize(txn_bytes[4:])
     i = 4 + len(tx_in_count_bytes)
 
     # Parse coinbase bytes
@@ -541,7 +422,7 @@ def print_transaction(txn_bytes):
         i += len(b''.join(tx_in))
 
     # Parse transaction output count bytes
-    tx_out_count_bytes, tx_out_count = unmarshal_compactsize(txn_bytes[i:])
+    tx_out_count_bytes, tx_out_count = btc_bytes.unmarshal_compactsize(txn_bytes[i:])
     tx_out_list = []
     i += len(tx_out_count_bytes)
 
@@ -554,24 +435,19 @@ def print_transaction(txn_bytes):
     lock_time = txn_bytes[i:i+4]
 
     prefix = PREFIX * 2
-    print('{}{:32} version: {}'.format(prefix, version.hex(),
-                                       unmarshal_uint(version)))
+    print('{}{:32} version: {}'.format(prefix, version.hex(), btc_bytes.unmarshal_uint(version)))
 
     print('\n{}Transaction Inputs:'.format(prefix))
     print(prefix + '-' * 32)
-    print('{}{:32} input txn count: {}'.format(prefix, tx_in_count_bytes.hex(),
-                                               tx_in_count))
+    print('{}{:32} input txn count: {}'.format(prefix, tx_in_count_bytes.hex(), tx_in_count))
     print_transaction_inputs(tx_in_list)
 
     print('\n{}Transaction Outputs:'.format(prefix))
     print(prefix + '-' * 32)
-    print('{}{:32} output txn count: {}'.format(prefix,
-                                                tx_out_count_bytes.hex(),
-                                                tx_out_count))
+    print('{}{:32} output txn count: {}'.format(prefix, tx_out_count_bytes.hex(), tx_out_count))
     print_transaction_outputs(tx_out_list)
 
-    print('{}{:32} lock time: {}'.format(prefix, lock_time.hex(),
-                                         unmarshal_uint(lock_time)))
+    print('{}{:32} lock time: {}'.format(prefix, lock_time.hex(), btc_bytes.unmarshal_uint(lock_time)))
     if txn_bytes[i + 4:]:
         print('EXTRA: {}'.format(txn_bytes[i + 4:].hex()))
 
@@ -583,18 +459,13 @@ def print_transaction_inputs(tx_in_list):
     """
     prefix = PREFIX * 2
     for i, tx_in in enumerate(tx_in_list, start=1):
-        print('\n{}Transaction {}{}:'.format(prefix, i,
-                                             ' (Coinbase)' if i == 1 else ''))
+        print('\n{}Transaction {}{}:'.format(prefix, i, ' (Coinbase)' if i == 1 else ''))
         print(prefix + '*' * 32)
         hash, index, script_bytes, sig_script, seq = tx_in[0]
         script_bytes_count = tx_in[1]
-        print('{}{:32}\n{}{:32} hash\n{}-'.format(prefix, hash.hex()[:32],
-                                                  prefix, hash.hex()[32:],
-                                                  prefix))
-        print('{}{:32} index: {}'.format(prefix, index.hex(),
-                                         unmarshal_uint(index)))
-        print('{}{:32} script bytes: {}'.format(prefix, script_bytes.hex(),
-                                                script_bytes_count))
+        print('{}{:32}\n{}{:32} hash\n{}-'.format(prefix, hash.hex()[:32], prefix, hash.hex()[32:], prefix))
+        print('{}{:32} index: {}'.format(prefix, index.hex(), btc_bytes.unmarshal_uint(index)))
+        print('{}{:32} script bytes: {}'.format(prefix, script_bytes.hex(), script_bytes_count))
         print('{}{:32} {}script'.format(prefix,
                                         sig_script.hex(),
                                         'coinbase ' if i == 1 else ''))
@@ -612,13 +483,11 @@ def print_transaction_outputs(tx_out_list):
         print(prefix + '*' * 32)
         value, pk_script_bytes, pk_script = tx_out[0]
         pk_script_bytes_count = tx_out[1]
-        satoshis = unmarshal_uint(value)
+        satoshis = btc_bytes.unmarshal_uint(value)
         btc = sat_to_btc(satoshis)
-        print('{}{:32} value: {} satoshis = {} BTC'.format(prefix, value.hex(),
-                                                           satoshis, btc))
-        print('{}{:32} public key script length: {}\n{}-'
-              .format(prefix, pk_script_bytes.hex(),
-                      pk_script_bytes_count, prefix))
+        print('{}{:32} value: {} satoshis = {} BTC'.format(prefix, value.hex(), satoshis, btc))
+        print('{}{:32} public key script length: {}\n{}-'.format(prefix, pk_script_bytes.hex(),
+                                                                 pk_script_bytes_count, prefix))
         for j in range(0, pk_script_bytes_count * 2, 32):
             print('{}{:32}{}'.format(prefix, pk_script.hex()[j:j + 32],
                                      ' public key script\n{}-'.format(prefix)
@@ -635,12 +504,12 @@ def parse_coinbase(cb_bytes, version):
     """
     hash_null = cb_bytes[:32]
     index = cb_bytes[32:36]
-    script_bytes, script_bytes_count = unmarshal_compactsize(cb_bytes[36:])
+    script_bytes, script_bytes_count = btc_bytes.unmarshal_compactsize(cb_bytes[36:])
     i = 36 + len(script_bytes)
 
     height = None
     # Version 1 doesn't require height parameter prior to block 227,836
-    if unmarshal_uint(version) > 1:
+    if btc_bytes.unmarshal_uint(version) > 1:
         height = cb_bytes[i:i + 4]
         i += 4
 
@@ -648,11 +517,9 @@ def parse_coinbase(cb_bytes, version):
     sequence = cb_bytes[i + script_bytes_count: i + script_bytes_count + 4]
 
     if height:
-        return [hash_null, index, script_bytes, height, cb_script, sequence], \
-               script_bytes_count
+        return [hash_null, index, script_bytes, height, cb_script, sequence], script_bytes_count
     else:
-        return [hash_null, index, script_bytes, cb_script, sequence], \
-               script_bytes_count
+        return [hash_null, index, script_bytes, cb_script, sequence], script_bytes_count
 
 
 def parse_tx_out(tx_out_bytes):
@@ -662,8 +529,7 @@ def parse_tx_out(tx_out_bytes):
     :return: list of the tx out bytes, number of bytes in the script
     """
     value = tx_out_bytes[:8]
-    pk_script_bytes, pk_script_bytes_count = \
-        unmarshal_compactsize(tx_out_bytes[8:])
+    pk_script_bytes, pk_script_bytes_count = btc_bytes.unmarshal_compactsize(tx_out_bytes[8:])
     i = 8 + len(pk_script_bytes)
     pk_script = tx_out_bytes[i:i + pk_script_bytes_count]
     return [value, pk_script_bytes, pk_script], pk_script_bytes_count
@@ -677,12 +543,11 @@ def parse_tx_in(tx_in_bytes):
     """
     hash = tx_in_bytes[:32]
     index = tx_in_bytes[32:36]
-    script_bytes, script_bytes_count = unmarshal_compactsize(tx_in_bytes[36:])
+    script_bytes, script_bytes_count = btc_bytes.unmarshal_compactsize(tx_in_bytes[36:])
     i = 36 + len(script_bytes)
     sig_script = tx_in_bytes[i:i + script_bytes_count]
     sequence = tx_in_bytes[i + script_bytes_count:]
-    return [hash, index, script_bytes, sig_script, sequence], \
-           script_bytes_count
+    return [hash, index, script_bytes, sig_script, sequence], script_bytes_count
 
 
 def split_message(peer_msg_bytes):
@@ -693,7 +558,7 @@ def split_message(peer_msg_bytes):
     """
     msg_list = []
     while peer_msg_bytes:
-        payload_size = unmarshal_uint(peer_msg_bytes[16:20])
+        payload_size = btc_bytes.unmarshal_uint(peer_msg_bytes[16:20])
         msg_size = HEADER_SIZE + payload_size
         msg_list.append(peer_msg_bytes[:msg_size])
         # Discard to move onto next message
@@ -767,13 +632,10 @@ def send_getblocks_message(input_hash, current_height):
     :param current_height: local blockchain height
     :return: list of last 500 block headers, updated height
     """
-    getblocks_bytes = build_message('getblocks',
-                                    getblocks_message(input_hash.hex()))
-    peer_inv = exchange_messages(getblocks_bytes, expected_bytes=18027,
-                                 height=current_height + 1)
+    getblocks_bytes = build_message('getblocks', getblocks_message(input_hash.hex()))
+    peer_inv = exchange_messages(getblocks_bytes, expected_bytes=18027, height=current_height + 1)
     peer_inv_bytes = b''.join(peer_inv)
-    last_500_headers = [peer_inv_bytes[i:i + 32]
-                        for i in range(31, len(peer_inv_bytes), 36)]
+    last_500_headers = [peer_inv_bytes[i:i + 32] for i in range(31, len(peer_inv_bytes), 36)]
     current_height = update_current_height(peer_inv, current_height)
     return last_500_headers, current_height
 
@@ -786,20 +648,20 @@ def change_block_value(block, new_amt):
     :return: altered block
     """
     # Jump to the value index in the block
-    txn_count_bytes = unmarshal_compactsize(block[104:])[0]
+    txn_count_bytes = btc_bytes.unmarshal_compactsize(block[104:])[0]
     index = 104 + len(txn_count_bytes)
     version = block[index:index + 4]
     index += 4
-    tx_in_count_bytes = unmarshal_compactsize(block[index:])[0]
+    tx_in_count_bytes = btc_bytes.unmarshal_compactsize(block[index:])[0]
     index += len(tx_in_count_bytes)
     tx_in = parse_coinbase(block[index:], version)[0]
     index += len(b''.join(tx_in))
-    txn_out_count_bytes = unmarshal_compactsize(block[index:])[0]
+    txn_out_count_bytes = btc_bytes.unmarshal_compactsize(block[index:])[0]
     index += len(txn_out_count_bytes)
 
     # Display old value
     old_value_bytes = block[index:index + 8]
-    old_value = unmarshal_uint(old_value_bytes)
+    old_value = btc_bytes.unmarshal_uint(old_value_bytes)
     print('Block {}: change value from {} BTC to {} BTC'
           .format(BLOCK_NUMBER, sat_to_btc(old_value), sat_to_btc(new_amt)))
     print('-' * 41)
@@ -807,34 +669,33 @@ def change_block_value(block, new_amt):
           .format(sat_to_btc(old_value), old_value))
 
     # Verify old merkle hash
-    old_merkle = swap_endian(block[60:92])
-    calc_old_merkle = swap_endian(hash(block[104 + len(tx_in_count_bytes):]))
+    old_merkle = btc_bytes.swap_endian(block[60:92])
+    calc_old_merkle = btc_bytes.swap_endian(hash(block[104 + len(tx_in_count_bytes):]))
     print('{:<24}'.format('old merkle hash:') + old_merkle.hex())
-    print('{:<24}'.format('verify old merkle hash:') + 'hash(txn) = {}'
-          .format(calc_old_merkle.hex()))
-    old_hash = swap_endian(hash(block[HEADER_SIZE:HEADER_SIZE + 80]))
+    print('{:<24}'.format('verify old merkle hash:') + 'hash(txn) = {}'.format(calc_old_merkle.hex()))
+    old_hash = btc_bytes.swap_endian(hash(block[HEADER_SIZE:HEADER_SIZE + 80]))
     print('{:<24}'.format('old block hash:') + old_hash.hex())
 
     print('*' * 16)
 
     # Change the value bytes in the block
-    block = block.replace(block[index:index + 8], uint64_t(new_amt))
+    block = block.replace(block[index:index + 8], btc_bytes.uint64_t(new_amt))
     new_value_bytes = block[index:index + 8]
-    new_value = unmarshal_uint(new_value_bytes)
+    new_value = btc_bytes.unmarshal_uint(new_value_bytes)
     print('{:<24}'.format('new value:') + '{} BTC = {} satoshis'
           .format(sat_to_btc(new_value), new_value))
 
     # Calculate and display new merkle root
     calc_new_merkle = hash(block[104 + len(tx_in_count_bytes):])
     block = block.replace(block[60:92], calc_new_merkle)
-    new_merkle = swap_endian(block[60:92])
-    calc_new_merkle = swap_endian(calc_new_merkle)
+    new_merkle = btc_bytes.swap_endian(block[60:92])
+    calc_new_merkle = btc_bytes.swap_endian(calc_new_merkle)
     print('{:<24}'.format('new merkle:') + new_merkle.hex())
     print('{:<24}'.format('verify new merkle:') + 'hash(txn) = {}'
           .format(calc_new_merkle.hex()))
 
     # Calculate and display new block hash
-    new_hash = swap_endian(hash(block[HEADER_SIZE:HEADER_SIZE + 80]))
+    new_hash = btc_bytes.swap_endian(hash(block[HEADER_SIZE:HEADER_SIZE + 80]))
     print('{:<24}'.format('new block hash:') + new_hash.hex())
     print('-' * 32)
     return block
@@ -861,24 +722,21 @@ def thief_experiment(my_block, last_500_blocks, new_value):
 
     # Print fields of the new thief block
     end = HEADER_SIZE + 80
-    thief_block_hash = swap_endian(hash(thief_block[HEADER_SIZE:end])).hex()
+    thief_block_hash = btc_bytes.swap_endian(hash(thief_block[HEADER_SIZE:end])).hex()
     print_message(thief_block, '*** TEST (value has changed) *** ')
 
     # Get the next block and verify it's prev block hash doesn't match the
     # new hash of the altered/thief block
     print('\nBlock # {} data: '.format(BLOCK_NUMBER + 1))
     next_block_hash = last_500_blocks[(BLOCK_NUMBER) % 500]
-    getdata_msg = build_message('getdata',
-                               getdata_message(2, next_block_hash.hex()))
+    getdata_msg = build_message('getdata', getdata_message(2, next_block_hash.hex()))
     next_block = exchange_messages(getdata_msg, wait=True)
     next_block = b''.join(next_block)
-    prev_block_hash = swap_endian(next_block[28:60]).hex()
-    print('\nBlock {} prev block hash : {}'.format(BLOCK_NUMBER + 1,
-                                                   prev_block_hash))
+    prev_block_hash = btc_bytes.swap_endian(next_block[28:60]).hex()
+    print('\nBlock {} prev block hash : {}'.format(BLOCK_NUMBER + 1, prev_block_hash))
     print('Block {} altered hash: {}'.format(BLOCK_NUMBER, thief_block_hash))
-    print('{} == {} -> {} -> reject!'
-          .format(prev_block_hash, thief_block_hash,
-                  prev_block_hash == thief_block_hash))
+    print('{} == {} -> {} -> reject!'.format(prev_block_hash, thief_block_hash,
+                                             prev_block_hash == thief_block_hash))
 
 
 def main():
@@ -899,20 +757,18 @@ def main():
     exchange_messages(ping_bytes, expected_bytes=32)
 
     # Send getblocks (starting from genesis) -> receive inv
-    block_hash = swap_endian(BLOCK_GENESIS)
+    block_hash = btc_bytes.swap_endian(BLOCK_GENESIS)
     current_height = 0
     # Store last 500 blocks from inv messages
     last_500_blocks = []
     # Keep sending getblocks until inventory has the desired block number
     while current_height < BLOCK_NUMBER:
-        last_500_blocks, current_height = \
-            send_getblocks_message(block_hash, current_height)
+        last_500_blocks, current_height = send_getblocks_message(block_hash, current_height)
         block_hash = last_500_blocks[-1]
 
     # Retrieve block, send getdata for the block -> receive block message
     my_block_hash = last_500_blocks[(BLOCK_NUMBER - 1) % 500]
-    getdata_bytes = build_message('getdata',
-                                  getdata_message(2, my_block_hash.hex()))
+    getdata_bytes = build_message('getdata', getdata_message(2, my_block_hash.hex()))
     msg_list = exchange_messages(getdata_bytes, height=BLOCK_NUMBER, wait=True)
     my_block = b''.join(msg_list)
 
