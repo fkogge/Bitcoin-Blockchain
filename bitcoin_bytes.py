@@ -6,6 +6,7 @@ Author: Francis Kogge
 Date: 12/04/2021
 """
 
+
 def compactsize_t(n):
     """
     Marshals compactsize data type.
