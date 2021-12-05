@@ -164,6 +164,11 @@ def compactsize_t(n):
 
 
 def unmarshal_compactsize(b):
+    """
+    Unarshals compactsize data type.
+    :param n: bytes
+    :return: raw bytes, integer
+    """
     key = b[0]
     if key == 0xff:
         return b[0:9], unmarshal_uint(b[1:9])
