@@ -23,7 +23,7 @@ IPs used for testing:
 47.40.67.209   
 104.129.171.121
 '''
-BTC_IP = '47.40.67.209'
+BTC_IP = '99.132.89.133'
 BTC_PORT = 8333  # Mainnet
 BTC_PEER_ADDRESS = (BTC_IP, BTC_PORT)
 BTC_SOCK = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # TCP socket
@@ -37,7 +37,7 @@ HEADER_SIZE = 24  # For all Bitcoin message headers
 COMMAND_SIZE = 12  # Message command length
 VERSION = 70015
 SU_ID = 4124597
-BLOCK_NUMBER = SU_ID % 10000  # 4597
+BLOCK_NUMBER = 6554#SU_ID % 10000  # 4597
 BUFFER_SIZE = 64000  # sock recv argument
 PREFIX = '  '
 
