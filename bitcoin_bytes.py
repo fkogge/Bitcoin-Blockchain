@@ -24,7 +24,7 @@ def compactsize_t(n):
 
 def unmarshal_compactsize(b):
     """
-    Unarshals compactsize data type.
+    Unmarshals compactsize data type.
     :param n: bytes
     :return: raw bytes, integer
     """
