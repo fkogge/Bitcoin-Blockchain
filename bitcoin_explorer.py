@@ -13,6 +13,7 @@ Date: 12/05/2021
 import random
 import time
 import socket
+import sys
 import bitcoin_bytes as btc_bytes
 from time import strftime, gmtime
 from hashlib import sha256
@@ -24,7 +25,7 @@ IPs used for testing:
 47.40.67.209   
 104.129.171.121
 '''
-BTC_IP = '99.132.89.133'
+BTC_IP = '47.40.67.209'
 BTC_PORT = 8333  # Mainnet
 BTC_PEER_ADDRESS = (BTC_IP, BTC_PORT)
 BTC_SOCK = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # TCP socket
@@ -621,7 +622,7 @@ def send_getblocks_message(input_hash, current_height):
     return last_500_headers, current_height
 
 
-def change_block_value(block, new_amt):
+def change_block_value(block, block_number, new_amt):
     """
     Change the satoshi reward value of the block.
     :param block: block to change
@@ -644,7 +645,7 @@ def change_block_value(block, new_amt):
     old_value_bytes = block[index:index + 8]
     old_value = btc_bytes.unmarshal_uint(old_value_bytes)
     print('Block {}: change value from {} BTC to {} BTC'
-          .format(BLOCK_NUMBER, sat_to_btc(old_value), sat_to_btc(new_amt)))
+          .format(block_number, sat_to_btc(old_value), sat_to_btc(new_amt)))
     print('-' * 41)
     print('{:<24}'.format('old value:') + '{} BTC = {} satoshis'.format(sat_to_btc(old_value), old_value))
 
@@ -679,7 +680,7 @@ def change_block_value(block, new_amt):
     return block
 
 
-def thief_experiment(my_block, last_500_blocks, new_value):
+def thief_experiment(my_block, block_number, last_500_blocks, new_value):
     """
     Experiment with being a Bitcoin thief by changing the value of a transaction
     then showing how the new block would not get accepted by the Bitcoin
@@ -694,7 +695,7 @@ def thief_experiment(my_block, last_500_blocks, new_value):
     satoshis = btc_to_sat(btcs)
 
     # Change block value, merkle hash, and update checksum
-    thief_block = change_block_value(my_block, satoshis)
+    thief_block = change_block_value(my_block, block_number, satoshis)
     thief_block = thief_block.replace(thief_block[20:HEADER_SIZE], checksum(thief_block[HEADER_SIZE:]))
 
     # Print fields of the new thief block
@@ -704,20 +705,27 @@ def thief_experiment(my_block, last_500_blocks, new_value):
 
     # Get the next block and verify it's prev block hash doesn't match the
     # new hash of the altered/thief block
-    print('\nBlock # {} data: '.format(BLOCK_NUMBER + 1))
-    next_block_hash = last_500_blocks[(BLOCK_NUMBER) % 500]
+    print('\nBlock # {} data: '.format(block_number + 1))
+    next_block_hash = last_500_blocks[(block_number) % 500]
     getdata_msg = build_message('getdata', getdata_message(2, next_block_hash))
     next_block = exchange_messages(getdata_msg, wait=True)
     next_block = b''.join(next_block)
     prev_block_hash = btc_bytes.swap_endian(next_block[28:60]).hex()
-    print('\nBlock {} prev block hash : {}'.format(BLOCK_NUMBER + 1, prev_block_hash))
-    print('Block {} altered hash: {}'.format(BLOCK_NUMBER, thief_block_hash))
+    print('\nBlock {} prev block hash : {}'.format(block_number + 1, prev_block_hash))
+    print('Block {} altered hash: {}'.format(block_number, thief_block_hash))
     print('{} == {} -> {} -> reject!'.format(prev_block_hash, thief_block_hash,
                                              prev_block_hash == thief_block_hash))
 
 
 def main():
     """Executes program from main entry point."""
+    if len(sys.argv) != 2:
+        print('Usage: bitcoin_explorer.py BLOCK_NUMBER')
+        exit(1)
+
+    # Block number from command line argument
+    block_number = int(sys.argv[1])
+
     # Establish connection with Bitcoin node
     BTC_SOCK.connect(BTC_PEER_ADDRESS)
 
@@ -739,18 +747,18 @@ def main():
     # Store last 500 blocks from inv messages
     last_500_blocks = []
     # Keep sending getblocks until inventory has the desired block number
-    while current_height < BLOCK_NUMBER:
+    while current_height < block_number:
         last_500_blocks, current_height = send_getblocks_message(block_hash, current_height)
         block_hash = last_500_blocks[-1]
 
     # Retrieve block, send getdata for the block -> receive block message
-    my_block_hash = last_500_blocks[(BLOCK_NUMBER - 1) % 500]
+    my_block_hash = last_500_blocks[(block_number - 1) % 500]
     getdata_bytes = build_message('getdata', getdata_message(2, my_block_hash))
-    msg_list = exchange_messages(getdata_bytes, height=BLOCK_NUMBER, wait=True)
+    msg_list = exchange_messages(getdata_bytes, height=block_number, wait=True)
     my_block = b''.join(msg_list)
 
     # Pick new reward value for the bitcoin
-    thief_experiment(my_block, last_500_blocks, 4000)
+    thief_experiment(my_block, block_number, last_500_blocks, 4000)
 
     # Close connection to Bitcoin node
     BTC_SOCK.close()
