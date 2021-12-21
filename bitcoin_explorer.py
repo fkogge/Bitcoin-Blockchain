@@ -169,7 +169,8 @@ def print_message(msg, text=None, height=None):
     payload = msg[HEADER_SIZE:]
     command = print_header(msg[:HEADER_SIZE], checksum(payload))
     if payload:
-        print(PREFIX + '{}'.format(command.upper()))
+        header_hash = btc_bytes.swap_endian(hash(payload[:80])).hex() if command == 'block' else ''
+        print('{}{} {}'.format(PREFIX, command.upper(), header_hash))
         print(PREFIX + '-' * 56)
 
     if command == 'version':
@@ -367,9 +368,6 @@ def print_block_message(payload):
     txns = payload[80 + len(txn_count_bytes):]
 
     prefix = PREFIX * 2
-    block_hash = btc_bytes.swap_endian(hash(payload[:80]))
-    print('{}{:32}\n{}{:32} block hash\n{}-'
-          .format(prefix, block_hash.hex()[:32], prefix, block_hash.hex()[32:], prefix))
     print('{}{:32} version: {}\n{}-'
           .format(prefix, version.hex(), btc_bytes.unmarshal_int(version), prefix))
     prev_hash = btc_bytes.swap_endian(prev_block)
@@ -622,6 +620,16 @@ def send_getblocks_message(input_hash, current_height):
     return last_500_headers, current_height
 
 
+def peer_height_from_version(vsn_bytes):
+    """
+    Retrieves the height of the peer's blockchain using the start_height bytes
+    from their version message.
+    :param vsn_bytes: peer version message bytes
+    :return: peer blockchain height
+    """
+    return btc_bytes.unmarshal_uint(vsn_bytes[-5:-1])
+
+
 def change_block_value(block, block_number, new_amt):
     """
     Change the satoshi reward value of the block.
@@ -726,42 +734,46 @@ def main():
     # Block number from command line argument
     block_number = int(sys.argv[1])
 
-    # Establish connection with Bitcoin node
-    BTC_SOCK.connect(BTC_PEER_ADDRESS)
+    with BTC_SOCK:
+        # Establish connection with Bitcoin node
+        BTC_SOCK.connect(BTC_PEER_ADDRESS)
 
-    # Send version -> receive version, verack
-    version_bytes = build_message('version', version_message())
-    exchange_messages(version_bytes, expected_bytes=126)
+        # Send version -> receive version, verack
+        version_bytes = build_message('version', version_message())
+        peer_vsn_bytes = exchange_messages(version_bytes, expected_bytes=126)[0]
+        peer_height = peer_height_from_version(peer_vsn_bytes)
 
-    # Send verack -> receive sendheaders, sendcmpct, ping, addr, feefilter
-    verack_bytes = build_message('verack', EMPTY_STRING)
-    exchange_messages(verack_bytes, expected_bytes=202)
+        # Send verack -> receive sendheaders, sendcmpct, ping, addr, feefilter
+        verack_bytes = build_message('verack', EMPTY_STRING)
+        exchange_messages(verack_bytes, expected_bytes=202)
 
-    # # Send ping -> receive pong
-    ping_bytes = build_message('ping', ping_message())
-    exchange_messages(ping_bytes, expected_bytes=32)
+        # Send ping -> receive pong
+        ping_bytes = build_message('ping', ping_message())
+        exchange_messages(ping_bytes, expected_bytes=32)
 
-    # Send getblocks (starting from genesis) -> receive inv
-    block_hash = btc_bytes.swap_endian(BLOCK_GENESIS)
-    current_height = 0
-    # Store last 500 blocks from inv messages
-    last_500_blocks = []
-    # Keep sending getblocks until inventory has the desired block number
-    while current_height < block_number:
-        last_500_blocks, current_height = send_getblocks_message(block_hash, current_height)
-        block_hash = last_500_blocks[-1]
+        # Check supplied block number against peer's blockchain height
+        if block_number > peer_height:
+            print('\nCould not retrieve block {}: max height is {}'.format(block_number, peer_height))
+            exit(1)
 
-    # Retrieve block, send getdata for the block -> receive block message
-    my_block_hash = last_500_blocks[(block_number - 1) % 500]
-    getdata_bytes = build_message('getdata', getdata_message(2, my_block_hash))
-    msg_list = exchange_messages(getdata_bytes, height=block_number, wait=True)
-    my_block = b''.join(msg_list)
+        # Send getblocks (starting from genesis) -> receive inv
+        block_hash = btc_bytes.swap_endian(BLOCK_GENESIS)
+        current_height = 0
+        # Store last 500 blocks from inv messages
+        last_500_blocks = []
+        # Keep sending getblocks until inventory has the desired block number
+        while current_height < block_number:
+            last_500_blocks, current_height = send_getblocks_message(block_hash, current_height)
+            block_hash = last_500_blocks[-1]
 
-    # Pick new reward value for the bitcoin
-    thief_experiment(my_block, block_number, last_500_blocks, 4000)
+        # Retrieve block, send getdata for the block -> receive block message
+        my_block_hash = last_500_blocks[(block_number - 1) % 500]
+        getdata_bytes = build_message('getdata', getdata_message(2, my_block_hash))
+        msg_list = exchange_messages(getdata_bytes, height=block_number, wait=True)
+        my_block = b''.join(msg_list)
 
-    # Close connection to Bitcoin node
-    BTC_SOCK.close()
+        # Pick new reward value for the bitcoin
+        thief_experiment(my_block, block_number, last_500_blocks, 4000)
 
 
 if __name__ == '__main__':
